@@ -1,0 +1,34 @@
+# Game data must never be committed: it is Bigpoint's property.
+DSOClient/
+extracted/
+godot_export/
+*.nb
+*.nbi
+*.nvx2
+*.n3
+*.nax3
+*.nac
+*.dds
+*.crn
+*.glb
+*.gltf
+*.map
+*.col
+*.db4
+*.bank
+
+# Reports and logs produced by the pipeline
+*.log
+export_report.json
+*.map.json
+*.fx.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Godot
+.godot/
+*.import

@@ -1,0 +1,4 @@
+# Pillow decodes the DXT1/DXT3/DXT5 textures shipped by the client.
+Pillow>=10.0
+# numpy is used for bind-matrix inversion and normal-map channel work.
+numpy>=1.24
