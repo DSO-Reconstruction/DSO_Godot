@@ -114,21 +114,76 @@ thousands of objects.
 
 ## 6. Particle effects
 
+The `.glb` of an effect on its own looks broken, and that is expected: glTF
+can carry neither an additive blend mode nor a particle emitter. What the
+importer shows is the emitter's *spawn surface*, drawn as a lit,
+alpha-blended blob. Both facts are in the sidecar `.fx.json`, so one script
+puts them back:
+
 ```bash
-cp godot/fx_to_scenes.gd ~/MyProject/tools/
+cp /path/to/DSO_Godot/godot/fx_to_scenes.gd ~/MyProject/tools/
 godot --headless --path ~/MyProject --script res://tools/fx_to_scenes.gd
 ```
 
-This writes a `<model>.fx.tscn` next to each `.glb` that has emitters, with a
-`GPUParticles3D` per emitter: lifetime, rate, gravity, spread, size curve,
-RGBA colour ramp, blend mode and texture.
+It writes a `<model>.fx.tscn` next to every `<model>.glb` that has effects.
+**Use that scene, not the `.glb`.** It holds the imported model with:
 
-**It is an approximation.** Nebula's emission model is not Godot's: a rate
-becomes a live-particle count, four-point envelopes become `Curve`/`Gradient`
-resources, and stretch effects (`stretch`, `stretch_to_start`) have no
-equivalent and are dropped. Expect to touch up the effects that matter.
+- the per-node render state restored from the engine's own `MNTP` tag —
+  `Additive` becomes an unshaded, additively blended material with depth
+  writes off, `AlphaTest` an alpha scissor, `Decal` an unshaded overlay, and
+  so on for the twenty states the client uses. This is the fix if your
+  effects came out as dark or milky quads: glTF only has OPAQUE / MASK /
+  BLEND, so every additive glow imported as a *lit, alpha-blended* surface;
+- the glow artwork put back where an unshaded material can see it. Most
+  Nebula glows have no `DiffMap0` at all -- the picture is in `EmsvMap0`, and
+  the engine's additive pass adds *that*. In glTF it becomes an
+  emissiveTexture over a white base colour, and Godot's unshaded shading
+  reads only ALBEDO, so the quads turned into sheets of pure white being
+  added to the frame. The emission is folded back into the albedo;
+- `Refraction` nodes rebuilt as a real screen-space shader (a DuDv warp of
+  the back buffer) instead of the distortion map drawn as colour. The back
+  buffer only holds *opaque* geometry, so a refraction effect floating in an
+  otherwise empty scene samples black: give the scene a floor;
+- each `PSND` emitter turned into a `GPUParticles3D` whose emission points
+  and normals are the emitter mesh's own vertices, so particles are born
+  where and along the direction the artist authored. The emitter mesh itself
+  stops being drawn.
 
-## 7. Player characters
+Still an approximation: Nebula's emission *rate* becomes a pool of live
+particles, its four-point envelopes become `Curve` / `Gradient` resources,
+and `stretch` / `stretch_to_start` have no Godot equivalent.
+
+### A project with nothing but effects
+
+```bash
+python3 make_fx_project.py --project ~/DSOFX --godot /path/to/godot
+```
+
+Stages the effects with the textures they reference (symlinks, so no second
+copy on disk), imports, runs the conversion and drops in `fx_browser.gd`:
+left/right walks the effects, drag orbits, `R` restarts the emitters, `S` is
+slow motion, `G` hides the floor, `B` cycles the background.
+
+## 7. The interface
+
+```bash
+python3 export_ui.py --root extracted/export_win32 --out ~/MyProject/dso \
+    --res-prefix res://dso
+```
+
+`--res-prefix` must say where the output ends up inside the project, or the
+scenes will not find their textures. Then open any `dso/ui/<window>.tscn`, or
+put `dso/ui/ui_browser.gd` on a full-rect `Control` and run it: left/right
+walks the 164 windows, `L` cycles the language, `V` reveals the alternative
+layouts the exporter hid.
+
+Buttons already work: `dso_button.gd` swaps the `normal` / `pressed` /
+`mouseover` / `disabled` artwork and emits `dso_pressed(event_name)` with the
+event string the game's own UI code listened for.
+
+Details and known gaps: [UI.md](UI.md).
+
+## 8. Player characters
 
 `uniskel` and `uniskel_dwarf` each hold thousands of equipment pieces and
 hundreds of named outfits in a single `.n3`. Exported whole, one came to
@@ -168,7 +223,7 @@ This part is a reconstruction: the rotation present in the data is ignored,
 since the engine only keeps translation and scale. If a build looks wrong,
 start here.
 
-## 8. Known traps
+## 9. Known traps
 
 **Orientation.** Nebula3 and glTF are both right-handed Y-up, so nothing is
 converted. Verified: characters and mobs import upright. If something arrives

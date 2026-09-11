@@ -1,6 +1,9 @@
 """Nebula resource path resolution ('msh:', 'tex:', 'ani:') and texture
 conversion to PNG, since glTF cannot reference DDS."""
 import os
+import shutil
+import subprocess
+import tempfile
 
 PREFIX_DIR = {"msh": "meshes", "tex": "textures", "ani": "anims",
               "shd": "shaders", "mdl": "models", "phys": "physics"}
@@ -40,10 +43,59 @@ class Resolver:
         return sorted(self._miss)
 
 
+# --- Crunch (.crn) ----------------------------------------------------------
+# A fifth of the client's textures are Crunch-compressed, which Pillow cannot
+# read. `tools/build_crn2dds.sh` builds a transcoder to plain DXTn DDS; when
+# it is absent those textures are simply skipped.
+_CRN_CACHE = os.path.join(tempfile.gettempdir(), "dso_crn_cache")
+_CRN_TOOL_MISSING = []
+
+
+def crn_tool():
+    for cand in (os.environ.get("DSO_CRN2DDS"),
+                 os.path.join(os.path.dirname(os.path.dirname(
+                     os.path.abspath(__file__))), "build", "crn2dds"),
+                 shutil.which("crn2dds")):
+        if cand and os.path.isfile(cand) and os.access(cand, os.X_OK):
+            return cand
+    return None
+
+
+def crn_to_dds(src):
+    """Transcode a .crn to a cached .dds. Returns the path, or None."""
+    tool = crn_tool()
+    if tool is None:
+        if not _CRN_TOOL_MISSING:
+            _CRN_TOOL_MISSING.append(True)
+        return None
+    key = os.path.abspath(src).lstrip(os.sep).replace(os.sep, "__")
+    dst = os.path.join(_CRN_CACHE, key + ".dds")
+    if os.path.isfile(dst) and os.path.getmtime(dst) >= os.path.getmtime(src):
+        return dst
+    os.makedirs(_CRN_CACHE, exist_ok=True)
+    try:
+        r = subprocess.run([tool], input="%s\t%s\n" % (src, dst),
+                           capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return dst if r.returncode == 0 and os.path.isfile(dst) else None
+
+
+def _decodable(src):
+    """Path Pillow can open: .crn goes through the transcoder first."""
+    if src.lower().endswith(".crn"):
+        return crn_to_dds(src)
+    return src
+
+
 def dds_to_png(src, dst):
-    """Decompress a DDS (DXT1/3/5) to PNG. True if the PNG is in place."""
+    """Decompress a DDS or CRN to PNG. True if the PNG is in place."""
     if os.path.isfile(dst) and os.path.getmtime(dst) >= os.path.getmtime(src):
         return True
+    real = _decodable(src)
+    if real is None:
+        return False
+    src = real
     os.makedirs(os.path.dirname(dst), exist_ok=True)
     try:
         from PIL import Image
@@ -65,6 +117,7 @@ def spec_to_roughness(src, dst):
     """
     if os.path.isfile(dst) and os.path.getmtime(dst) >= os.path.getmtime(src):
         return True
+    src = _decodable(src) or src
     os.makedirs(os.path.dirname(dst), exist_ok=True)
     try:
         from PIL import Image, ImageChops
@@ -93,6 +146,7 @@ def bump_to_normal(src, dst):
     """
     if os.path.isfile(dst) and os.path.getmtime(dst) >= os.path.getmtime(src):
         return True
+    src = _decodable(src) or src
     os.makedirs(os.path.dirname(dst), exist_ok=True)
     try:
         import numpy as np
@@ -132,7 +186,7 @@ def has_alpha(src, threshold=0.995):
     try:
         import numpy as np
         from PIL import Image
-        with Image.open(src) as im:
+        with Image.open(_decodable(src) or src) as im:
             im.load()
             if im.mode == "RGBA":
                 a = np.asarray(im)[..., 3]

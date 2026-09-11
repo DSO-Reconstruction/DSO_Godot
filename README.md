@@ -16,6 +16,7 @@ set rather than a sample.
 | `.n3` models | 15,592 | **15,592 / 15,592** parsed |
 | `.nax3` + `.nac` animations | 3,767 files, 17,759 clips | **3,767 / 3,767** parsed |
 | `.map` maps | 391, 2,218,376 instances | **391 / 391** parsed, 0 missing model |
+| `ui/*.bxml` windows | 164, 35,776 widgets | **164 / 164** parsed |
 | Export | ~19,900 `.glb`, ~21,400 `.png`, 391 map manifests | Khronos validator: *no errors* |
 
 Counts come from one particular client version; yours will differ slightly.
@@ -42,10 +43,14 @@ python3 batch_export.py --root extracted/export_win32 --out godot_export \
 python3 split_character.py extracted/export_win32/models/characters/uniskel.n3 \
     --root extracted/export_win32 --export-root godot_export
 
-# 4. Export the maps as placement manifests
+# 4. Export the interface (164 windows -> Control scenes)
+sh tools/build_crn2dds.sh          # once: the .crn texture transcoder
+python3 export_ui.py --root extracted/export_win32 --out godot_export
+
+# 5. Export the maps as placement manifests
 python3 export_maps.py --root extracted/export_win32 --out godot_export/maps
 
-# 5. Build a Godot project out of it all
+# 6. Build a Godot project out of it all
 python3 setup_godot.py --project ~/DSOGodot --godot /path/to/godot --stage light
 ```
 
@@ -93,6 +98,24 @@ godot/                    scripts to run inside Godot
   verify_scene.gd         check a built scene, orientation and motion included
 ```
 
+## The interface
+
+`ui/*.bxml` is Nebula3 binary XML: 164 windows, 35,776 widgets. Each widget's
+artwork is one group of a shared mesh (`meshes/ui/<window>_s_0.nvx2`) that
+carries the geometry, the atlas UVs and the vertex colours; the widget's own
+`rect` is a fraction of the screen.
+
+```bash
+python3 export_ui.py --root extracted/export_win32 --out godot_export
+```
+
+Per window it writes a Godot `Control` tree (`ui/<window>.tscn`) and the
+decoded widget tree (`ui/<window>.ui.json`, nothing dropped), plus the atlases
+as PNG and the localisation tables (`ui/loca/<lang>.json`).
+`godot/ui_browser.gd` flips through the lot; `godot/dso_button.gd` drives the
+button states the client shipped. The format and the coordinate system are in
+[docs/UI.md](docs/UI.md).
+
 ## Formats
 
 Full notes in [docs/FORMATS.md](docs/FORMATS.md). The short version:
@@ -129,13 +152,16 @@ converter reconstructs a proper tangent-space normal map.
 - **Shader-parameter animators** (`FloatAnimator`) and **UV scrolling**
   (`UvAnimator`) have no animatable glTF equivalent. They are counted in the
   export report but not translated.
-- **Particle systems** are exported as parameters (`.fx.json`) and converted
-  to `GPUParticles3D` by `godot/fx_to_scenes.gd`. That conversion is an
-  approximation: Nebula's emission model is not Godot's, and stretch-type
-  effects have no equivalent.
+- **Particle systems** are exported as parameters (`.fx.json`) and rebuilt on
+  top of the `.glb` by `godot/fx_to_scenes.gd`. The emission model is still an
+  approximation: Nebula's birth rate becomes a live particle count, its
+  four-point envelopes become `Curve`/`Gradient`, and `stretch` /
+  `stretch_to_start` have no equivalent. `make_fx_project.py` builds a
+  project with nothing but the effects and a viewer, to check them.
 - **Cubemap reflections** are kept in each material's `extras` rather than
   wired up, since glTF has no per-material environment reflection.
-- `.crn` (Crunch) textures are not decoded. They only appear in UI folders.
+- **`.crn` (Crunch) textures** are decoded through a transcoder built by
+  `tools/build_crn2dds.sh`; without it those 2 559 textures are skipped.
 
 ## Credits and licensing
 

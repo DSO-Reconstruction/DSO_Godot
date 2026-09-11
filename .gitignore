@@ -23,6 +23,9 @@ export_report.json
 *.map.json
 *.fx.json
 
+# Fetched third-party headers and the compiled .crn transcoder
+build/
+
 # Python
 __pycache__/
 *.py[cod]
