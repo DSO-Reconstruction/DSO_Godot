@@ -21,6 +21,15 @@ set rather than a sample.
 
 Counts come from one particular client version; yours will differ slightly.
 
+## A client folder can hold several patch levels
+
+Drakensang patches by dropping new bundles beside the old ones, so the same
+path can exist twice with different content. The unpacker tags every bundle
+entry with the content id the TOC indexes by and keeps the one the TOC points
+at; without that, a window ends up with its layout from one patch and its
+artwork mesh from another, and the interface renders as smeared garbage. The
+run prints `stale_dropped` when it happens.
+
 ## Requirements
 
 - Python 3.10+ with `Pillow` and `numpy` (`pip install -r requirements.txt`)

@@ -63,7 +63,8 @@ def do_bundle(path, rel, data):
         names.append(data[off:off + nlen].decode("utf-8", "replace")); off += nlen
     count = 0
     for name in names:
-        off += 4 + 32                              # tag + hash
+        off += 4                                   # tag
+        content_id = data[off:off + 32].decode("latin1"); off += 32
         size, rel_off = struct.unpack_from("<2I", data, off); off += 8
         start = rel_off + base_off
         blob = data[start:start + size]
@@ -73,9 +74,19 @@ def do_bundle(path, rel, data):
                 out = decomp(blob[8:], xsize)
             except Exception:
                 out = blob[8:]
-            write_out(name[:-3] if name.endswith(".nz") else name, out)
+            name = name[:-3] if name.endswith(".nz") else name
         else:
-            write_out(name, blob)
+            out = blob
+        # A client folder can hold several patch levels of the same bundle,
+        # each carrying its own version of a path. Writing them all to the
+        # bare path leaves whichever happened to be extracted last, which
+        # silently mixes versions -- a window's layout from one patch with
+        # its artwork mesh from another. The entry's content id is the same
+        # id the TOC indexes by, so tag the file with it and let relocate()
+        # keep the one the TOC actually points at.
+        if HASH_SUFFIX.search("x._" + content_id):
+            name += "._" + content_id
+        write_out(name, out)
         count += 1
     return count
 
@@ -133,7 +144,7 @@ def relocate():
             except Exception as e:
                 print(f"[toc] {fp}: {e}")
     print(f"[toc] {len(h2p)} entries across {len(tocs)} TOC files", flush=True)
-    moved = stripped = 0
+    moved = stripped = dropped = 0
     for root, _, files in os.walk(OUT_ROOT):
         for fn in list(files):
             fp = os.path.normpath(os.path.join(root, fn))
@@ -148,10 +159,19 @@ def relocate():
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 os.replace(fp, dst)
                 moved += 1
+                continue
+            # Not in any TOC: either a file the index does not cover, or a
+            # leftover from an older patch level of the same bundle. Place it
+            # only if nothing is there yet -- never over a file the TOC chose.
+            plain = os.path.join(root, HASH_SUFFIX.sub("", fn))
+            if os.path.exists(plain):
+                os.remove(fp)
+                dropped += 1
             else:
-                os.replace(fp, os.path.join(root, HASH_SUFFIX.sub("", fn)))
+                os.replace(fp, plain)
                 stripped += 1
-    print(f"[toc] moved={moved} hash_stripped={stripped}", flush=True)
+    print(f"[toc] moved={moved} hash_stripped={stripped} stale_dropped={dropped}",
+          flush=True)
 
 
 def main():
